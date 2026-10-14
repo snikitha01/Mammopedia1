@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from wdbc_service import predict_wdbc
@@ -11,10 +12,17 @@ app = FastAPI(
 )
 
 
-# -----------------------------
-# Input format for WDBC analysis
-# -----------------------------
+# Allow the Lovable frontend to call the API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
+
+# Input format for WDBC analysis
 class WDBCRequest(BaseModel):
     features: list[float] = Field(
         ...,
@@ -22,10 +30,7 @@ class WDBCRequest(BaseModel):
     )
 
 
-# -----------------------------
 # Basic endpoints
-# -----------------------------
-
 @app.get("/")
 def root():
     return {
@@ -41,13 +46,9 @@ def health():
     }
 
 
-# -----------------------------
 # WDBC prediction endpoint
-# -----------------------------
-
 @app.post("/analyze/tabular")
 def analyze_tabular(request: WDBCRequest):
-
     try:
         result = predict_wdbc(request.features)
 
@@ -64,7 +65,7 @@ def analyze_tabular(request: WDBCRequest):
             detail=str(e)
         )
 
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=500,
             detail="Prediction failed."
