@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from wdbc_service import predict_wdbc
+from wdbc_service import predict_wdbc, explain_wdbc
 
 
 app = FastAPI(
@@ -69,6 +69,23 @@ def analyze_tabular(request: WDBCRequest):
         raise HTTPException(
             status_code=500,
             detail="Prediction failed."
+        )
+@app.post("/explain/tabular")
+def explain_tabular(request: WDBCRequest):
+    try:
+        explanation = explain_wdbc(request.features)
+        return {
+            "success": True,
+            "dataset": "WDBC",
+            "model": "Logistic Regression",
+            "explanation": explanation,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Explanation generation failed.",
         )
 
 @app.post("/report/generate")
