@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-
+from quantum_service import run_qsvm_experiment
 from wdbc_service import predict_wdbc, explain_wdbc
 
 
@@ -325,3 +325,12 @@ def generate_report(request: WDBCRequest):
             detail="PDF report generation failed.",
         )
 
+@app.post("/quantum/train")
+def train_quantum_model():
+    try:
+        return run_qsvm_experiment()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"QSVM experiment failed: {str(exc)}",
+        )
