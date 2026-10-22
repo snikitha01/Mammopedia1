@@ -90,7 +90,7 @@ def explain_tabular(request: WDBCRequest):
 
 @app.post("/report/generate")
 def generate_report(request: WDBCRequest):
-    """Generate a PDF report from a fresh WDBC prediction."""
+    """Generate a PDF report with WDBC prediction and feature contributions."""
     from io import BytesIO
     from datetime import datetime, timezone
 
@@ -105,10 +105,15 @@ def generate_report(request: WDBCRequest):
         Spacer,
         Table,
         TableStyle,
+        KeepTogether,
     )
+    from reportlab.graphics.shapes import Drawing, String, Rect
+    from reportlab.lib.colors import HexColor
 
     try:
         result = predict_wdbc(request.features)
+        explanation_result = explain_wdbc(request.features)
+        explained_features = explanation_result.get("features", [])
 
         buffer = BytesIO()
         doc = SimpleDocTemplate(
@@ -116,8 +121,8 @@ def generate_report(request: WDBCRequest):
             pagesize=A4,
             rightMargin=2 * cm,
             leftMargin=2 * cm,
-            topMargin=2 * cm,
-            bottomMargin=2 * cm,
+            topMargin=1.7 * cm,
+            bottomMargin=1.7 * cm,
         )
 
         styles = getSampleStyleSheet()
@@ -129,9 +134,7 @@ def generate_report(request: WDBCRequest):
             ),
             Paragraph(
                 "Generated: "
-                + datetime.now(timezone.utc).strftime(
-                    "%Y-%m-%d %H:%M UTC"
-                ),
+                + datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
                 styles["Normal"],
             ),
             Spacer(1, 18),
@@ -159,14 +162,134 @@ def generate_report(request: WDBCRequest):
         table = Table(details, colWidths=[5 * cm, 10 * cm])
         table.setStyle(
             TableStyle([
-                ("BACKGROUND", (0, 0), (-1, 0),
-                 colors.HexColor("#E8EAF6")),
+                ("BACKGROUND", (0, 0), (0, -1), HexColor("#E8EAF6")),
                 ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("PADDING", (0, 0), (-1, -1), 8),
             ])
         )
         story.extend([table, Spacer(1, 18)])
+
+        story.append(
+            Paragraph("Feature Contributions", styles["Heading2"])
+        )
+        story.append(
+            Paragraph(
+                "The following features have the largest absolute signed "
+                "score contributions for this prediction.",
+                styles["BodyText"],
+            )
+        )
+        story.append(Spacer(1, 8))
+
+        # Sort by absolute contribution and show the 10 strongest.
+        top_features = sorted(
+            explained_features,
+            key=lambda item: abs(float(item.get("contribution", 0))),
+            reverse=True,
+        )[:10]
+
+        if top_features:
+            max_value = max(
+                abs(float(item["contribution"])) for item in top_features
+            ) or 1.0
+
+            chart_width = 450
+            chart_height = 28 * len(top_features) + 20
+            drawing = Drawing(chart_width, chart_height)
+
+            for index, item in enumerate(top_features):
+                y = chart_height - (index + 1) * 28
+                name = str(item.get("feature", "Unknown feature"))
+                contribution = float(item.get("contribution", 0))
+                direction = str(item.get("direction", ""))
+                bar_width = abs(contribution) / max_value * 175
+                is_malignant = direction == "toward_malignant"
+                bar_color = (
+                    HexColor("#D9485F")
+                    if is_malignant
+                    else HexColor("#159570")
+                )
+
+                drawing.add(
+                    String(0, y + 7, name[:25], fontSize=8)
+                )
+                drawing.add(
+                    Rect(
+                        170, y + 4, bar_width, 10,
+                        fillColor=bar_color,
+                        strokeColor=None,
+                    )
+                )
+                drawing.add(
+                    String(
+                        355, y + 6,
+                        f"{contribution:+.3f}",
+                        fontSize=8,
+                    )
+                )
+
+            story.append(drawing)
+            story.append(Spacer(1, 8))
+
+            contribution_rows = [
+                ["Feature", "Contribution", "Direction"]
+            ]
+            for item in top_features:
+                contribution = float(item["contribution"])
+                direction = item.get("direction", "")
+                label = (
+                    "Toward malignant"
+                    if direction == "toward_malignant"
+                    else "Toward benign"
+                    if direction == "toward_benign"
+                    else "Unspecified"
+                )
+                contribution_rows.append([
+                    str(item.get("feature", "Unknown feature")),
+                    f"{contribution:+.4f}",
+                    label,
+                ])
+
+            contribution_table = Table(
+                contribution_rows,
+                colWidths=[6 * cm, 3 * cm, 5 * cm],
+                repeatRows=1,
+            )
+            contribution_table.setStyle(
+                TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), HexColor("#E8EAF6")),
+                    ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("PADDING", (0, 0), (-1, -1), 6),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ])
+            )
+            story.extend([
+                contribution_table,
+                Spacer(1, 12),
+            ])
+        else:
+            story.append(
+                Paragraph(
+                    "Feature contributions were not available for this analysis.",
+                    styles["BodyText"],
+                )
+            )
+
+        story.append(
+            Paragraph("Interpretation and Limitations", styles["Heading2"])
+        )
+        story.append(
+            Paragraph(
+                "Contributions are signed Logistic Regression score "
+                "contributions. Positive values move the model score toward "
+                "malignant; negative values move it toward benign. These "
+                "values are not causal effects or clinical risk estimates.",
+                styles["BodyText"],
+            )
+        )
+        story.append(Spacer(1, 8))
         story.append(
             Paragraph("Limitations and Safety", styles["Heading2"])
         )
