@@ -6,3 +6,5 @@ scikit-learn==1.6.1
 joblib
 python-multipart
 reportlab
+qiskit
+qiskit-machine-learning
